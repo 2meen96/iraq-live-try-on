@@ -1,0 +1,139 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Phase 3: Primitive Definition
+    function isValidId(id) { 
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); 
+    }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isSignedIn() { return request.auth != null; }
+    function isVerified() { return request.auth.token.email_verified == true; }
+    function isAdmin() { return isSignedIn() && request.auth.token.email == 'alwashameen96@gmail.com'; }
+    
+    // Offers (Public Read, Admin Write)
+    match /offers/{serviceId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    
+    // Catalogs (Public Read, Admin Write)
+    match /catalogs/{catalogId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    
+    // User Public Profile
+    function isValidUserPublic(data) {
+      return data.keys().hasAll(['createdAt']) &&
+        data.keys().size() <= 2 &&
+        data.createdAt == request.time &&
+        (data.get('displayName', '') is string) &&
+        (data.get('displayName', '').size() <= 100);
+    }
+    
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId);
+      allow list: if isSignedIn() && request.auth.uid == userId; // Users shouldn't freely list all users
+      
+      allow create: if isSignedIn() && 
+                    isVerified() &&
+                    request.auth.uid == userId && 
+                    isValidUserPublic(incoming());
+                    
+      allow update: if isSignedIn() && 
+                    isVerified() &&
+                    request.auth.uid == userId && 
+                    // Immutable fields
+                    incoming().createdAt == existing().createdAt &&
+                    incoming().diff(existing()).affectedKeys().hasOnly(['displayName']) &&
+                    (incoming().get('displayName', '') is string) && (incoming().get('displayName', '').size() <= 100);
+      
+      // Split collection for PII
+      match /private/info {
+        function isValidUserPrivate(data) {
+          return data.keys().hasAll(['email']) &&
+            data.keys().size() == 1 &&
+            data.email is string &&
+            data.email.size() <= 254;
+        }
+        
+        allow get: if isSignedIn() && request.auth.uid == userId;
+        allow list: if false; // Never list PII
+        allow create: if isSignedIn() && 
+                      isVerified() &&
+                      request.auth.uid == userId && 
+                      isValidUserPrivate(incoming());
+        allow update: if false; // Email is synced via Firebase Auth, not freely updatable here
+      }
+    }
+    
+    // TryOnSessions
+    function isValidTryOn(data) {
+      return data.keys().hasAll(['userId', 'serviceType', 'createdAt', 'status']) &&
+        data.userId is string && data.userId.size() <= 128 && data.userId == request.auth.uid &&
+        data.serviceType is string && data.serviceType.size() <= 100 &&
+        data.status is string && data.status.size() <= 50 &&
+        data.createdAt == request.time &&
+        (data.get('referenceImageUrl', '') is string) &&
+        (data.get('targetImageUrl', '') is string) &&
+        (data.get('resultImageUrl', '') is string);
+    }
+    
+    match /tryons/{tryonId} {
+      allow get: if isSignedIn() && isValidId(tryonId) && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      
+      allow create: if isSignedIn() && 
+                    isVerified() &&
+                    isValidTryOn(incoming()) &&
+                    // Verify the user profile exists
+                    exists(/databases/$(database)/documents/users/$(incoming().userId));
+                    
+      allow update: if isSignedIn() && 
+                    isVerified() &&
+                    existing().userId == request.auth.uid &&
+                    incoming().userId == existing().userId &&
+                    incoming().createdAt == existing().createdAt &&
+                    incoming().diff(existing()).affectedKeys().hasOnly(['resultImageUrl', 'status']) &&
+                    (incoming().get('resultImageUrl', '') is string) &&
+                    (incoming().status is string && incoming().status.size() <= 50);
+                    
+      allow delete: if isSignedIn() && isVerified() && existing().userId == request.auth.uid;
+    }
+    
+    // Appointments
+    function isValidAppointment(data) {
+      return data.keys().hasAll(['userId', 'serviceType', 'date', 'status', 'createdAt']) &&
+        data.userId is string && data.userId.size() <= 128 && data.userId == request.auth.uid &&
+        data.serviceType is string && data.serviceType.size() <= 100 &&
+        data.date is string && data.date.size() <= 100 &&
+        data.status is string && data.status.size() <= 50 &&
+        data.createdAt == request.time;
+    }
+
+    match /appointments/{appointmentId} {
+      allow get: if isSignedIn() && isValidId(appointmentId) && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      
+      allow create: if isSignedIn() &&
+                    isVerified() &&
+                    isValidAppointment(incoming()) &&
+                    exists(/databases/$(database)/documents/users/$(incoming().userId));
+                    
+      allow update: if isSignedIn() &&
+                    isVerified() &&
+                    existing().userId == request.auth.uid &&
+                    incoming().userId == existing().userId &&
+                    incoming().createdAt == existing().createdAt &&
+                    incoming().diff(existing()).affectedKeys().hasOnly(['status']) &&
+                    (incoming().status is string && incoming().status.size() <= 50);
+    }
+  }
+}

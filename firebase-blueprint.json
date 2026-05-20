@@ -1,0 +1,69 @@
+{
+  "entities": {
+    "UserPublic": {
+      "title": "UserPublic",
+      "description": "Public user profile.",
+      "type": "object",
+      "properties": {
+        "displayName": { "type": "string" },
+        "createdAt": { "type": "number", "description": "Timestamp" }
+      },
+      "required": ["createdAt"]
+    },
+    "UserPrivate": {
+      "title": "UserPrivate",
+      "description": "Private user information containing PII.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" }
+      },
+      "required": ["email"]
+    },
+    "TryOnSession": {
+      "title": "TryOnSession",
+      "description": "A generated AR try-on session for a user.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "serviceType": { "type": "string" },
+        "referenceImageUrl": { "type": "string" },
+        "targetImageUrl": { "type": "string" },
+        "resultImageUrl": { "type": "string" },
+        "createdAt": { "type": "number", "description": "Timestamp" },
+        "status": { "type": "string" }
+      },
+      "required": ["userId", "serviceType", "createdAt", "status"]
+    },
+    "Appointment": {
+      "title": "Appointment",
+      "description": "A booking made by a user.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "serviceType": { "type": "string" },
+        "date": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["userId", "serviceType", "date", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": { "$ref": "#/entities/UserPublic" },
+      "description": "Stores basic public profile info. ID matches Auth UID."
+    },
+    "users/{userId}/private/info": {
+      "schema": { "$ref": "#/entities/UserPrivate" },
+      "description": "Stores sensitive PII like email."
+    },
+    "tryons/{tryonId}": {
+      "schema": { "$ref": "#/entities/TryOnSession" },
+      "description": "Stores generated try-on items."
+    },
+    "appointments/{appointmentId}": {
+      "schema": { "$ref": "#/entities/Appointment" },
+      "description": "Stores user appointments."
+    }
+  }
+}

@@ -1,0 +1,125 @@
+@import "tailwindcss";
+
+:root, [data-theme="light"] {
+  --theme-bg: #FFF0F5; /* Lavender blush / very light pink */
+  --theme-bg-elevated: #FFFFFF;
+  --theme-surface: #FFE4E1; /* Misty rose */
+  --theme-text: #2D2024;
+  --theme-text-inverse: #FFFFFF;
+  --theme-text-muted: rgba(45, 32, 36, 0.6);
+  --theme-rosegold: #C6748B; /* Darker rose to be readable */
+  --theme-accent: #B08D46;
+  --theme-accent-dark: #8E7036;
+  --theme-border: rgba(0, 0, 0, 0.08);
+  --theme-border-accent: rgba(176, 141, 70, 0.3);
+}
+
+[data-theme="dark"] {
+  --theme-bg: #0F0F10;
+  --theme-bg-elevated: #161618;
+  --theme-surface: #000000;
+  --theme-text: #FDFCFB;
+  --theme-text-inverse: #000000;
+  --theme-text-muted: rgba(253, 252, 251, 0.4);
+  --theme-rosegold: #E5C1CD;
+  --theme-accent: #D4AF37;
+  --theme-accent-dark: #C5A059;
+  --theme-border: rgba(255, 255, 255, 0.1);
+  --theme-border-accent: rgba(212, 175, 55, 0.3);
+}
+
+@theme {
+  --font-serif: "Cormorant Garamond", Georgia, serif;
+  --font-sans: "Inter", "Montserrat", system-ui, sans-serif;
+  
+  --color-luxury-bg: var(--theme-bg);
+  --color-luxury-charcoal: var(--theme-bg-elevated);
+  --color-luxury-rosegold: var(--theme-rosegold);
+  --color-luxury-accent: var(--theme-accent);
+  --color-luxury-accent-dark: var(--theme-accent-dark);
+  --color-luxury-pearl: var(--theme-text);
+  --color-luxury-muted: var(--theme-text-muted);
+}
+
+body {
+    background-color: var(--theme-bg);
+    color: var(--theme-text);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    transition: background-color 0.5s ease, color 0.5s ease;
+    overflow-x: hidden;
+}
+
+h1, h2, h3, h4, .font-serif {
+  font-family: var(--font-serif);
+}
+
+.lux-button {
+  border: 1px solid var(--theme-border-accent);
+  border-radius: 9999px;
+  padding: 8px 24px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  background: transparent;
+  color: var(--theme-text);
+  transition: all 0.3s ease;
+  cursor: pointer;
+}
+
+.lux-button:hover {
+  background: color-mix(in srgb, var(--theme-accent) 10%, transparent);
+}
+
+.lux-button-solid {
+  background: linear-gradient(to right, var(--theme-accent), var(--theme-accent-dark));
+  color: var(--theme-text-inverse);
+  border-radius: 9999px;
+  padding: 8px 32px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  transition: all 0.3s ease;
+  cursor: pointer;
+  border: none;
+}
+
+.lux-button-solid:hover {
+  opacity: 0.9;
+}
+
+.micro-label {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.3em;
+    opacity: 0.5;
+}
+
+.theme-surface {
+    background-color: var(--theme-surface);
+}
+
+/* Specific styling for the range slider thumb */
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 16px;
+  width: 16px;
+  border-radius: 50%;
+  background: var(--theme-accent);
+  cursor: pointer;
+  border: 2px solid var(--theme-bg-elevated);
+  box-shadow: 0 0 5px rgba(0,0,0,0.3);
+}
+
+input[type=range]::-moz-range-thumb {
+  height: 16px;
+  width: 16px;
+  border-radius: 50%;
+  background: var(--theme-accent);
+  cursor: pointer;
+  border: 2px solid var(--theme-bg-elevated);
+  box-shadow: 0 0 5px rgba(0,0,0,0.3);
+}
