@@ -76,7 +76,7 @@ export default function AutoMakeover() {
                 return updated;
             });
         } catch (err) {
-            console.error('Failed to generate option', index, err);
+            console.warn('Failed to generate option', index, err);
             // Optionally handle individual error visually
         }
       };
@@ -90,7 +90,7 @@ export default function AutoMakeover() {
       }
       
     } catch (e: any) {
-      console.error(e);
+      console.warn(e);
       setErrorMsg(e?.message || 'Generation failed. Please try again.');
     } finally {
       if (progressInterval.current) clearInterval(progressInterval.current);

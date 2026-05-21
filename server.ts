@@ -65,6 +65,226 @@ async function startServer() {
     }
   });
 
+  // API Route: YouCam Makeup Proxy
+  app.post('/api/ai/youcam', async (req, res) => {
+    try {
+      const youcamKey = process.env.YOUCAM_API_KEY;
+      if (!youcamKey) {
+        return res.status(500).json({ error: 'Missing YouCam API Key. Add YOUCAM_API_KEY to Secrets.' });
+      }
+      
+      const { targetImage, referenceImage } = req.body;
+      if (!targetImage || !referenceImage) {
+        return res.status(400).json({ error: 'Missing targetImage or referenceImage base64 strings' });
+      }
+
+      // Helper function to upload an image
+      const uploadImageToYouCam = async (base64Img: string, fileName: string) => {
+          let mimeType = 'image/jpeg';
+          let base64Data = base64Img;
+          
+          if (base64Img.includes('base64,')) {
+              mimeType = base64Img.split(';')[0].split(':')[1];
+              base64Data = base64Img.split('base64,')[1];
+          }
+          
+          const buffer = Buffer.from(base64Data, 'base64');
+          const fileSize = buffer.length;
+
+          // 1. Get upload URL
+          const initRes = await fetch("https://yce-api-01.makeupar.com/s2s/v2.0/file/mu-transfer", {
+              method: "POST",
+              headers: {
+                  "Authorization": `Bearer ${youcamKey}`,
+                  "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                  files: [{ content_type: mimeType, file_name: fileName, file_size: fileSize }]
+              })
+          });
+
+          if (!initRes.ok) {
+              const err = await initRes.text();
+              throw new Error(`Init Upload Error [${initRes.status}]: ${err}`);
+          }
+
+          const initData = await initRes.json();
+          const fileInfo = initData.data.files[0];
+          const uploadRequest = fileInfo.requests[0];
+
+          // 2. Upload binary data
+          const uploadRes = await fetch(uploadRequest.url, {
+              method: uploadRequest.method, // usually PUT
+              headers: uploadRequest.headers,
+              body: buffer
+          });
+
+          if (!uploadRes.ok) {
+              const err = await uploadRes.text();
+              throw new Error(`Binary Upload Error [${uploadRes.status}]: ${err}`);
+          }
+
+          return fileInfo.file_id;
+      };
+
+      console.log('Uploading target image...');
+      const src_file_url = await uploadImageToYouCam(targetImage, 'target.jpg');
+      console.log('Uploading reference image...');
+      const ref_file_url = await uploadImageToYouCam(referenceImage, 'reference.jpg');
+
+      // 3. Start Task
+      console.log('Starting makeup transfer task...');
+      const taskRes = await fetch("https://yce-api-01.makeupar.com/s2s/v2.0/task/mu-transfer", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${youcamKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          src_file_id: src_file_url,
+          ref_file_id: ref_file_url
+        })
+      });
+
+      if (!taskRes.ok) {
+          const err = await taskRes.text();
+          throw new Error(`Task Start Error [${taskRes.status}]: ${err}`);
+      }
+
+      const taskData = await taskRes.json();
+      const taskId = taskData.data.task_id;
+      console.log(`Task started with ID: ${taskId}`);
+
+      // 4. Poll for result
+      let resultUrl = '';
+      for (let i = 0; i < 30; i++) { // Poll for up to ~1 minute
+          await new Promise(resolve => setTimeout(resolve, 2000)); // wait 2 seconds
+          console.log(`Polling task ${taskId} (attempt ${i + 1})...`);
+          
+          const pollRes = await fetch(`https://yce-api-01.makeupar.com/s2s/v2.0/task/mu-transfer/${taskId}`, {
+              method: 'GET',
+              headers: {
+                  "Authorization": `Bearer ${youcamKey}`
+              }
+          });
+
+          if (pollRes.ok) {
+              const pollData = await pollRes.json();
+              if (pollData.data) {
+                  if (pollData.data.task_status === 'success' && pollData.data.results && pollData.data.results.url) {
+                      resultUrl = pollData.data.results.url;
+                      break;
+                  } else if (pollData.data.task_status === 'error') {
+                      throw new Error(`Task failed: ${pollData.data.error_message || pollData.data.error || 'Unknown error'}`);
+                  }
+              }
+          } else {
+              console.warn(`Poll request failed: ${pollRes.status}`);
+          }
+      }
+
+      if (!resultUrl) {
+          throw new Error('Timeout waiting for makeup transfer task to complete.');
+      }
+
+      console.log('Downloading result image...');
+      const imgRes = await fetch(resultUrl);
+      const arrayBuffer = await imgRes.arrayBuffer();
+      const base64 = Buffer.from(arrayBuffer).toString('base64');
+      const finalImageBase64 = `data:image/jpeg;base64,${base64}`;
+
+      res.json({ resultImage: finalImageBase64 });
+      
+    } catch (error: any) {
+      console.error('YouCam Proxy Error:', error);
+      res.status(500).json({ error: error.message || 'Internal YouCam Error' });
+    }
+  });
+
+  // API Route: AI Super Resolution (Upscaling) via YouCam
+  app.post('/api/ai/upscale', async (req, res) => {
+    try {
+      const youcamKey = process.env.YOUCAM_API_KEY;
+      if (!youcamKey) {
+        return res.status(500).json({ error: 'Missing YouCam API Key.' });
+      }
+      
+      const { image } = req.body;
+      if (!image) return res.status(400).json({ error: 'Missing image' });
+
+      // Helper function to upload an image
+      const uploadImageToYouCam = async (base64Img: string, fileName: string, slug: string) => {
+          let mimeType = 'image/jpeg';
+          let base64Data = base64Img;
+          if (base64Img.includes('base64,')) {
+              mimeType = base64Img.split(';')[0].split(':')[1];
+              base64Data = base64Img.split('base64,')[1];
+          }
+          const buffer = Buffer.from(base64Data, 'base64');
+          
+          const initRes = await fetch(`https://yce-api-01.makeupar.com/s2s/v2.0/file/${slug}`, {
+              method: "POST",
+              headers: { "Authorization": `Bearer ${youcamKey}`, "Content-Type": "application/json" },
+              body: JSON.stringify({ files: [{ content_type: mimeType, file_name: fileName, file_size: buffer.length }] })
+          });
+          if (!initRes.ok) throw new Error(`Upload Error [${initRes.status}]`);
+          const initData = await initRes.json();
+          const fileInfo = initData.data.files[0];
+          const uploadRequest = fileInfo.requests[0];
+
+          await fetch(uploadRequest.url, { method: uploadRequest.method, headers: uploadRequest.headers, body: buffer });
+          return fileInfo.file_id;
+      };
+
+      // Try multiple possible slugs for YouCam's enhancement API (usually it's photo-enhancer or generic image-restoration)
+      // Actually, perfect corp usually uses 'photo-enhancer' for Super Resolution
+      const slug = 'photo-enhancer'; 
+      const file_id = await uploadImageToYouCam(image, 'upscale.jpg', slug);
+
+      const taskRes = await fetch(`https://yce-api-01.makeupar.com/s2s/v2.0/task/${slug}`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${youcamKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ src_file_id: file_id }) // typically src_file_id
+      });
+      
+      if (!taskRes.ok) {
+          throw new Error('Enhancer API not found or failed: ' + taskRes.status);
+      }
+
+      const taskData = await taskRes.json();
+      const taskId = taskData.data.task_id;
+
+      let resultUrl = '';
+      for (let i = 0; i < 20; i++) {
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          const pollRes = await fetch(`https://yce-api-01.makeupar.com/s2s/v2.0/task/${slug}/${taskId}`, {
+              headers: { "Authorization": `Bearer ${youcamKey}` }
+          });
+          if (pollRes.ok) {
+              const pollData = await pollRes.json();
+              if (pollData.data?.task_status === 'success') {
+                  resultUrl = pollData.data.results.url;
+                  break;
+              } else if (pollData.data?.task_status === 'error') {
+                  throw new Error(`Task failed`);
+              }
+          }
+      }
+
+      if (!resultUrl) throw new Error('Timeout');
+
+      const imgRes = await fetch(resultUrl);
+      const arrayBuffer = await imgRes.arrayBuffer();
+      const finalImageBase64 = `data:image/jpeg;base64,${Buffer.from(arrayBuffer).toString('base64')}`;
+
+      res.json({ resultImage: finalImageBase64 });
+      
+    } catch (error: any) {
+      console.warn('YouCam Upscale Proxy Error (Falling back to Canvas):', error.message);
+      res.status(500).json({ error: 'YouCam Enhance API Failed', details: error.message });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

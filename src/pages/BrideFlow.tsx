@@ -110,7 +110,7 @@ export default function BrideFlow() {
         const enhanced = await enhancePrompt(adjustment, step);
         setAdjustment(enhanced);
     } catch (e) {
-        console.error("Enhancement failed", e);
+        console.warn("Enhancement failed", e);
     } finally {
         setEnhancingPrompt(false);
     }
@@ -170,7 +170,7 @@ export default function BrideFlow() {
       const suggestions = await suggestStyles(targetImage, type);
       setHairSuggestions(suggestions);
     } catch (err: any) {
-      console.error(err);
+      console.warn(err);
       const isQuotaExceeded = err?.message?.includes('429') || err?.status === 'RESOURCE_EXHAUSTED' || err?.message?.includes('quota');
       if (isQuotaExceeded) {
         setErrorMsg('Free tier quota exceeded or rate limit reached. Please provide a custom API Key to continue.');
@@ -261,7 +261,7 @@ export default function BrideFlow() {
                   reader.onloadend = () => resolve(reader.result as string);
               });
           } catch (e) {
-              console.error("Failed to convert image url to base64", e);
+              console.warn("Failed to convert image url to base64", e);
               throw new Error("فشل تحميل الصورة المرجعية. يرجى اختيار صورة أخرى.");
           }
       }
@@ -275,7 +275,7 @@ export default function BrideFlow() {
               styleDetailsObj = await extractStyleDetails(p_stylePayload, operationType as 'makeup' | 'hair');
               setExtractedStyleInfo(styleDetailsObj);
           } catch (e) {
-              console.error("Failed to extract specific style details", e);
+              console.warn("Failed to extract specific style details", e);
           }
       }
 
@@ -291,7 +291,7 @@ export default function BrideFlow() {
       }
 
     } catch (err: any) {
-      console.error(err);
+      console.warn(err);
       const isPermissionDenied = err?.message?.includes('403') || err?.status === 'PERMISSION_DENIED';
       const isQuotaExceeded = err?.message?.includes('429') || err?.status === 'RESOURCE_EXHAUSTED';
       

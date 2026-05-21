@@ -385,6 +385,208 @@ export const analyzeFacialProportions = async (imagesBase64: string[], context?:
     }
 };
 
+export async function aiSuperResolution(base64Image: string): Promise<string> {
+    try {
+        console.log("Calling YouCam Super Resolution API...");
+        const response = await fetch('/api/ai/upscale', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image: base64Image })
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            if (data.resultImage) {
+                console.log("AI Super Resolution successful via backend.");
+                return data.resultImage;
+            }
+        } else {
+            console.warn("Backend Super Resolution failed, falling back to local enhancement...");
+        }
+    } catch (e) {
+        console.warn("Backend Super Resolution network error, falling back to local enhancement...", e);
+    }
+    
+    // Fallback: Local Canvas edge enhancement and upscaling
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+            const scaleFactor = 2; // Fixed 2x upscale
+            const canvas = document.createElement('canvas');
+            const targetWidth = img.width * scaleFactor;
+            const targetHeight = img.height * scaleFactor;
+            
+            canvas.width = targetWidth;
+            canvas.height = targetHeight;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return reject("No canvas context");
+
+            // Use high quality smoothing
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+            ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+            
+            // Standard sharpening pseudo-convolution (Unsharp Mask)
+            const idata = ctx.getImageData(0, 0, targetWidth, targetHeight);
+            const data = idata.data;
+            const width = idata.width;
+            
+            // Simple sharpening kernel
+            const kernel = [
+                0, -1,  0,
+               -1,  5, -1,
+                0, -1,  0
+            ];
+            
+            const w = targetWidth;
+            const h = targetHeight;
+            const output = ctx.createImageData(w, h);
+            const dst = output.data;
+            
+            for (let y = 1; y < h - 1; y++) {
+                for (let x = 1; x < w - 1; x++) {
+                    let r = 0, g = 0, b = 0;
+                    for (let cy = 0; cy < 3; cy++) {
+                        for (let cx = 0; cx < 3; cx++) {
+                            const scy = y + cy - 1;
+                            const scx = x + cx - 1;
+                            const srcOff = (scy * w + scx) * 4;
+                            const wt = kernel[cy * 3 + cx];
+                            r += data[srcOff] * wt;
+                            g += data[srcOff + 1] * wt;
+                            b += data[srcOff + 2] * wt;
+                        }
+                    }
+                    const dstOff = (y * w + x) * 4;
+                    // Retain original alpha
+                    dst[dstOff] = r;
+                    dst[dstOff + 1] = g;
+                    dst[dstOff + 2] = b;
+                    dst[dstOff + 3] = data[dstOff + 3];
+                }
+            }
+            
+            ctx.putImageData(output, 0, 0);
+            resolve(canvas.toDataURL('image/jpeg', 0.95));
+        };
+        img.onerror = () => reject("Failed to load image for enhancement");
+        img.src = base64Image;
+    });
+}
+
+export async function centerCropImage(base64Image: string, zoomFactor: number = 1.5): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            const cropWidth = img.width / zoomFactor;
+            const cropHeight = img.height / zoomFactor;
+            
+            const sx = (img.width - cropWidth) / 2;
+            const sy = (img.height - cropHeight) / 2;
+
+            canvas.width = cropWidth;
+            canvas.height = cropHeight;
+            
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+                reject(new Error("Failed to get canvas context for cropping"));
+                return;
+            }
+            
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+            ctx.drawImage(img, sx, sy, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
+            resolve(canvas.toDataURL('image/jpeg', 0.95));
+        };
+        img.onerror = () => reject(new Error("Failed to load image for cropping"));
+        img.src = base64Image;
+    });
+}
+
+export async function preprocessYouCamImage(base64Image: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+            let width = img.width;
+            let height = img.height;
+            const MAX_SIDE = 1024;
+            const MIN_SIDE = 480;
+            
+            let scale = 1;
+
+            if (width > MAX_SIDE || height > MAX_SIDE) {
+                if (width > height) {
+                    scale = MAX_SIDE / width;
+                } else {
+                    scale = MAX_SIDE / height;
+                }
+            } else if (Math.min(width, height) < MIN_SIDE) {
+                if (width < height) {
+                    scale = MIN_SIDE / width;
+                } else {
+                    scale = MIN_SIDE / height;
+                }
+            }
+            
+            if (scale !== 1) {
+                width = Math.round(width * scale);
+                height = Math.round(height * scale);
+                
+                const canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) return reject("No canvas context");
+
+                ctx.imageSmoothingEnabled = true;
+                ctx.imageSmoothingQuality = 'high';
+                ctx.drawImage(img, 0, 0, width, height);
+                
+                resolve(canvas.toDataURL('image/jpeg', 0.95));
+            } else {
+                resolve(base64Image); // Already within limits
+            }
+        };
+        img.onerror = () => reject("Failed to load image for preprocessing");
+        img.src = base64Image;
+    });
+}
+
+export async function normalizeReferenceImageForYouCam(refImageBase64: string): Promise<string> {
+    try {
+        console.log("Normalizing reference image via Gemini...");
+        const img = extractBase64Data(refImageBase64);
+        const parts: any[] = [
+            { text: `You are an expert makeup artist and beauty photographer. Analyze the makeup style in the reference image and generate a new, perfectly clear, straight-on portrait of a model wearing this exact makeup.
+
+CRITICAL INSTRUCTIONS FOR MAKEUP EXTRACTION COMPATIBILITY:
+1. PERFECT FRONTAL POSE: The face MUST be perfectly centered, looking straight ahead at the camera. NO tilting or turning.
+2. EYES WIDE OPEN & CLEAR: Eyes MUST be fully open, looking directly at the lens. NO heavy eyelashes covering the pupils. 
+3. HAIR COMPLETELY PULLED BACK: All hair MUST be completely pulled back tightly away from the face. NO bangs, NO loose hair strands, NO veils, NO hats, and NO hands anywhere near the face or eyes. The entire facial structure and eyes must be 100% exposed.
+4. EVEN, FLAT LIGHTING: Use bright, even, diffused beauty lighting. AVOID ANY harsh shadows on the face, especially around the eyes or under the nose. Shadows will be misinterpreted as dark makeup.
+5. FLAWLESS MAKEUP: Replicate the eye, lip, and blush colors exactly. Keep it clean and flawlessly blended. absolutely NO thick cartoonish makeup.
+6. REALISM: The image must be a highly realistic, 8k resolution studio photograph. Do not make it look like a digital painting or CGI.` },
+            { inlineData: { data: img.data, mimeType: img.mimeType } }
+        ];
+        
+        const response = await callAI({
+            model: 'gemini-3.1-flash-image-preview',
+            contents: { parts }
+        });
+
+        for (const part of response.candidates?.[0]?.content?.parts || []) {
+            if (part.inlineData) {
+                return `data:image/jpeg;base64,${part.inlineData.data}`;
+            }
+        }
+        return refImageBase64;
+    } catch (e) {
+        console.warn("Failed to normalize reference image:", e);
+        return refImageBase64;
+    }
+}
+
 export const simulateAR = async (userImageBase64: string, styleImageBase64: string | undefined | null, prompt: string, operationType: 'makeup' | 'hair' | 'general' = 'general', makeupToggles?: { eyes: boolean, lips: boolean, foundation: boolean }, makeupIntensity: number = 50, styleDetails?: StyleDetails | null) => {
     // Inject style details into the prompt if provided
     let enrichedPrompt = prompt;
@@ -394,6 +596,85 @@ export const simulateAR = async (userImageBase64: string, styleImageBase64: stri
 
     if (operationType === 'makeup' && !prompt.includes('CLIENT REVISION REQUEST')) {
         console.log("Starting unified makeup transfer...");
+
+        if (styleImageBase64) {
+            console.log("Attempting YouCam API makeup transfer...");
+            
+            const executeYouCam = async (src: string, ref: string) => {
+                const response = await fetch('/api/ai/youcam', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        targetImage: src,
+                        referenceImage: ref,
+                    })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.resultImage) {
+                        return data.resultImage;
+                    }
+                } else {
+                    let errorMsg = await response.text();
+                    try {
+                        const parsed = JSON.parse(errorMsg);
+                        if (parsed.error) errorMsg = parsed.error;
+                    } catch (e) {}
+                    return { error: errorMsg };
+                }
+                return { error: "Unknown YouCam Error" };
+            };
+
+            let currentSrcImage = await preprocessYouCamImage(userImageBase64);
+            let currentRefImage = await preprocessYouCamImage(styleImageBase64);
+            
+            let res = await executeYouCam(currentSrcImage, currentRefImage);
+            
+            if (res && res.error && (res.error.includes('error_ref_') || res.error.includes('error_inappropriate_ref'))) {
+                console.log(`YouCam failed on Ref Image: ${res.error}. Normalizing via Gemini...`);
+                try {
+                    let normalizedRef = await normalizeReferenceImageForYouCam(styleImageBase64);
+                    currentRefImage = await preprocessYouCamImage(normalizedRef);
+                    console.log("Retrying YouCam with normalized reference image...");
+                    res = await executeYouCam(currentSrcImage, currentRefImage);
+                } catch (normErr) {
+                    console.warn("Normalization failed, sticking to original error.", normErr);
+                }
+            }
+
+            if (typeof res === 'string') {
+                console.log("YouCam API transfer successful.");
+                return res; // Return directly! Do not fall back to Gemini.
+            } else if (res && res.error) {
+                const errorMsg = res.error;
+                console.warn("YouCam API Failed:", errorMsg);
+                
+                if (errorMsg.includes('error_src_face_too_small')) {
+                    throw new Error("الصورة الشخصية بعيدة. يرجى التقاط صورة قريبة (Selfie) للوجه مباشرة.");
+                } else if (errorMsg.includes('error_ref_face_too_small')) {
+                    throw new Error("الوجه في الصورة المرجعية بعيد جداً. يرجى قصها للتركيز على الوجه.");
+                } else if (errorMsg.includes('error_src_no_face')) {
+                    throw new Error("لم يتم التعرف على وجه في صورتك.");
+                } else if (errorMsg.includes('error_ref_no_face')) {
+                     throw new Error("لم يتم التعرف على وجه في الصورة المرجعية.");
+                } else if (errorMsg.includes('error_ref_eye_occluded')) {
+                     throw new Error("العيون غير واضحة في الصورة المرجعية. يرجى اختيار صورة أوضح.");
+                } else if (errorMsg.includes('error_ref_eye_closed')) {
+                     throw new Error("العيون مغلقة في الصورة المرجعية. يرجى اختيار صورة بعيون مفتوحة لمعالجة المكياج بدقة.");
+                } else if (errorMsg.includes('error_inappropriate_ref')) {
+                     throw new Error("الصورة المرجعية غير مناسبة (قد يكون الوجه مائلاً، أو غير واضح، أو الإضاءة سيئة). يرجى اختيار صورة مرجعية أخرى واضحة ومباشرة.");
+                }
+
+                throw new Error(`مشكلة في نظام YouCam: ${errorMsg}. يرجى المحاولة بصورة أخرى.`);
+            }
+        }
+        
+        // If operationType is 'makeup' but we had no reference image, or if it's general...
+        // Wait, if it strictly requires YouCam for makeup, we should throw if YouCam didn't run.
+        if (operationType === 'makeup') {
+            throw new Error("يرجى اختيار صورة مرجعية (Reference Image) لوضع المكياج.");
+        }
         
         let currentImageBase64 = userImageBase64;
         let masks: { lips: string | null; eyes: string | null; skin: string | null } = { lips: null, eyes: null, skin: null };

@@ -5,6 +5,7 @@ import { motion } from 'motion/react';
 import { simulateAR, suggestStyles, AIStyleSuggestion, extractColorPalette, ColorPaletteItem, extractStyleDetails } from '../services/ai';
 import { useAuth, saveTryOn } from '../services/firebase';
 import ImageComparisonSlider from '../components/ImageComparisonSlider';
+import CropModal from '../components/CropModal';
 
 declare global {
   interface Window {
@@ -47,6 +48,9 @@ export default function TryOn() {
   const [isDraggingRef, setIsDraggingRef] = useState(false);
   const [isDraggingTarget, setIsDraggingTarget] = useState(false);
 
+  const [pendingCropTargetImage, setPendingCropTargetImage] = useState<string | null>(null);
+  const [pendingCropRefImage, setPendingCropRefImage] = useState<string | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const localStyleInputRef = useRef<HTMLInputElement>(null);
 
@@ -75,11 +79,8 @@ export default function TryOn() {
     if (file) {
       const reader = new FileReader();
       reader.onloadend = () => {
-        setTargetImage(reader.result as string);
-        setHairSuggestions([]);
-        setSelectedSuggestion(null);
-        setManualColor('');
-        setLocalStyleImage(null);
+        setPendingCropTargetImage(reader.result as string);
+        if (fileInputRef.current) fileInputRef.current.value = '';
       };
       reader.readAsDataURL(file);
     }
@@ -90,9 +91,8 @@ export default function TryOn() {
     if (file) {
       const reader = new FileReader();
       reader.onloadend = () => {
-        setLocalStyleImage(reader.result as string);
-        setManualColor('');
-        setSelectedSuggestion(null);
+        setPendingCropRefImage(reader.result as string);
+        if (localStyleInputRef.current) localStyleInputRef.current.value = '';
       };
       reader.readAsDataURL(file);
     }
@@ -115,9 +115,7 @@ export default function TryOn() {
     if (file && file.type.startsWith('image/')) {
       const reader = new FileReader();
       reader.onloadend = () => {
-        setLocalStyleImage(reader.result as string);
-        setManualColor('');
-        setSelectedSuggestion(null);
+        setPendingCropRefImage(reader.result as string);
       };
       reader.readAsDataURL(file);
     }
@@ -140,14 +138,26 @@ export default function TryOn() {
     if (file && file.type.startsWith('image/')) {
       const reader = new FileReader();
       reader.onloadend = () => {
-        setTargetImage(reader.result as string);
-        setHairSuggestions([]);
-        setSelectedSuggestion(null);
-        setManualColor('');
-        setLocalStyleImage(null);
+        setPendingCropTargetImage(reader.result as string);
       };
       reader.readAsDataURL(file);
     }
+  };
+
+  const handleCropTargetComplete = (croppedBase64: string) => {
+    setTargetImage(croppedBase64);
+    setHairSuggestions([]);
+    setSelectedSuggestion(null);
+    setManualColor('');
+    setLocalStyleImage(null);
+    setPendingCropTargetImage(null);
+  };
+
+  const handleCropRefComplete = (croppedBase64: string) => {
+    setLocalStyleImage(croppedBase64);
+    setManualColor('');
+    setSelectedSuggestion(null);
+    setPendingCropRefImage(null);
   };
 
   const handleHairAnalysis = async () => {
@@ -158,7 +168,7 @@ export default function TryOn() {
       const suggestions = await suggestStyles(targetImage, serviceId);
       setHairSuggestions(suggestions);
     } catch (err: any) {
-      console.error(err);
+      console.warn(err);
       const isQuotaExceeded = err?.message?.includes('429') || err?.status === 'RESOURCE_EXHAUSTED' || err?.message?.includes('quota');
       if (isQuotaExceeded) {
         setErrorMsg('Free tier quota exceeded or rate limit reached. Please provide a custom API Key to continue.');
@@ -281,7 +291,7 @@ CRITICAL MANDATE:
                   reader.onloadend = () => resolve(reader.result as string);
               });
           } catch (e) {
-              console.error("Failed to convert image url to base64", e);
+              console.warn("Failed to convert image url to base64", e);
               throw new Error("فشل تحميل الصورة المرجعية. يرجى اختيار صورة أخرى.");
           }
       }
@@ -295,7 +305,7 @@ CRITICAL MANDATE:
               styleDetailsObj = await extractStyleDetails(styleImagePayload, operationType);
               setExtractedStyleInfo(styleDetailsObj);
           } catch (e) {
-              console.error("Failed to extract specific style details", e);
+              console.warn("Failed to extract specific style details", e);
           }
       }
 
@@ -308,9 +318,9 @@ CRITICAL MANDATE:
       }
       
       // Save session in background
-      saveTryOn(user.uid, serviceId, styleImage, targetImage, result).catch(console.error);
+      saveTryOn(user.uid, serviceId, styleImage, targetImage, result).catch(console.warn);
     } catch (err: any) {
-      console.error(err);
+      console.warn(err);
       const isPermissionDenied = err?.message?.includes('403') || err?.status === 'PERMISSION_DENIED' || err?.message?.includes('caller does not have permission');
       const isQuotaExceeded = err?.message?.includes('429') || err?.status === 'RESOURCE_EXHAUSTED' || err?.message?.includes('quota');
       
@@ -335,6 +345,7 @@ CRITICAL MANDATE:
   };
 
   return (
+    <>
     <div className="flex-1 max-w-6xl mx-auto w-full px-6 py-12">
       <div className="mb-12 text-center">
          <span className="text-[9px] uppercase tracking-[0.3em] opacity-40 block mb-4">Processing Layer v2.1</span>
@@ -805,5 +816,21 @@ CRITICAL MANDATE:
         </motion.div>
       )}
     </div>
+
+    {pendingCropTargetImage && (
+       <CropModal 
+          imageSrc={pendingCropTargetImage}
+          onCropComplete={handleCropTargetComplete}
+          onCropCancel={() => setPendingCropTargetImage(null)}
+       />
+    )}
+    {pendingCropRefImage && (
+       <CropModal 
+          imageSrc={pendingCropRefImage}
+          onCropComplete={handleCropRefComplete}
+          onCropCancel={() => setPendingCropRefImage(null)}
+       />
+    )}
+    </>
   );
 }
