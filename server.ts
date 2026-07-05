@@ -65,6 +65,36 @@ async function startServer() {
     }
   });
 
+  // API Route: AI Interactions proxy (for image gen models)
+  app.post('/api/ai/interactions', async (req, res) => {
+    try {
+      const apiKey = process.env.USER_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+      if (!apiKey) return res.status(500).json({ error: 'Missing Gemini API Key' });
+      
+      const ai = new GoogleGenAI({ apiKey });
+      const { model, input, response_modalities, generation_config } = req.body;
+      let response;
+      let lastError;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+          response = await ai.interactions.create({
+             model, input, response_modalities, generation_config
+          });
+          break;
+        } catch (error: any) {
+          lastError = error;
+          const waitTime = error.message?.includes('503') ? 6000 : 4000;
+          await new Promise(resolve => setTimeout(resolve, waitTime * (attempt + 1)));
+        }
+      }
+      if (!response) throw lastError;
+      res.json(response);
+    } catch (error: any) {
+      console.error('AI Interactions Proxy Error:', error);
+      res.status(500).json({ error: error.message || 'Internal AI Error' });
+    }
+  });
+
   // API Route: YouCam Makeup Proxy
   app.post('/api/ai/youcam', async (req, res) => {
     try {
@@ -282,6 +312,72 @@ async function startServer() {
     } catch (error: any) {
       console.warn('YouCam Upscale Proxy Error (Falling back to Canvas):', error.message);
       res.status(500).json({ error: 'YouCam Enhance API Failed', details: error.message });
+    }
+  });
+
+  // API Route: Replicate Enhancer / Fallback Proxy
+  app.post('/api/ai/replicate', async (req, res) => {
+    try {
+      const replicateKey = process.env.REPLICATE_API_KEY;
+      if (!replicateKey) {
+        return res.status(500).json({ error: 'Missing Replicate API Key.' });
+      }
+      
+      const { image, mode = 'enhance', prompt } = req.body;
+      if (!image) {
+        return res.status(400).json({ error: 'Missing image for Replicate processing' });
+      }
+
+      // Initialize Replicate lazily
+      const Replicate = (await import('replicate')).default;
+      const replicate = new Replicate({ auth: replicateKey });
+
+      let output;
+
+      if (mode === 'enhance') {
+        // Use CodeFormer for face restoration, enhancement, and AR-makeup blending
+        // It smooths out digital artifacts and makes AR makeup look photorealistic.
+        console.log("Running Replicate CodeFormer enhancement...");
+        output = await replicate.run(
+          "sczhou/codeformer:7de2ea26c616d5bf2245ad0d5e24f0ff9a6204578a5c876db53142edd9d2cd56",
+          {
+            input: {
+              image: image,
+              upscale: 2,
+              face_upsample: true,
+              background_enhance: true,
+              codeformer_fidelity: 0.65 // 0.65 adds a slight extra beautification/smoothing effect
+            }
+          }
+        );
+      } else if (mode === 'generate') {
+        console.log(`Running Replicate Instruct-Pix2Pix with prompt: ${prompt}`);
+        output = await replicate.run(
+          "timbrooks/instruct-pix2pix:30c1d0b916a6f8efce20493f5d61ee27491ab2a60437c13c588468b9810ec23f",
+          {
+            input: {
+              image: image,
+              prompt: prompt || "apply professional and beautiful evening makeup, apply eyeshadow and lipstick",
+              image_guidance_scale: 1.5,
+              num_inference_steps: 50,
+              guidance_scale: 7.5
+            }
+          }
+        );
+      } else {
+         return res.status(400).json({ error: 'Unsupported Replicate mode' });
+      }
+
+      // output from CodeFormer is typically a URI string
+      if (!output) {
+          throw new Error('Replicate returned no result');
+      }
+
+      res.json({ resultImage: typeof output === 'string' ? output : output[0] });
+
+    } catch (error: any) {
+      console.error('Replicate Proxy Error:', error);
+      res.status(500).json({ error: error.message || 'Internal Replicate Error' });
     }
   });
 
